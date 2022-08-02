@@ -35,11 +35,8 @@ def get_whois(ip_addrs):
     if ip.version == 4 and ip.is_private() is False:
         for i in info_of_ip['IPv4']:
             whois_server = i['whois']
-            if len(whois_server) == 0 and i['status'] != "Reserved":
-                whois_server = "whois.arin.net"
-            elif len(whois_server) == 0:
-                whois_server = None
-
+            if len(whois_server) == 0:
+                whois_server = "whois.arin.net" if i['status'] != "Reserved" else None
     return whois_server
 
 
@@ -54,7 +51,7 @@ def whois(target, whois_srv):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((whois_srv, WHOIS_PORT_NUMBER))
         if whois_srv == "whois.arin.net":
-            s.send(("n " + target + "\r\n").encode("utf-8"))
+            s.send((f"n {target}" + "\r\n").encode("utf-8"))
         else:
             s.send((target + "\r\n").encode("utf-8"))
         response = ''
@@ -62,7 +59,7 @@ def whois(target, whois_srv):
             d = s.recv(WHOIS_RECEIVE_BUFFER_SIZE)
             response += str(d)
             counter += 1
-            if str(d) == '' or counter == 5:
+            if not str(d) or counter == 5:
                 break
         s.close()
     except Exception as e:
@@ -78,9 +75,7 @@ def get_whois_nets(data):
     """
 
     pattern = r'([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}) - ([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})'
-    results = re.findall(pattern, data)
-
-    return results
+    return re.findall(pattern, data)
 
 
 def get_whois_orgname(data):

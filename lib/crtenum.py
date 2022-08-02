@@ -51,7 +51,7 @@ def scrape_crtsh(dom):
 
     for ent in tbl:
         sub_dom = ent.text
-        if not sub_dom.endswith('.' + dom):
+        if not sub_dom.endswith(f'.{dom}'):
             continue
         if sub_dom.startswith('*.'):
             print_status(f"\t {sub_dom} wildcard")

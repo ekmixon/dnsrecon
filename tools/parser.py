@@ -81,69 +81,71 @@ def xml_parse(xm_file, ifilter, tfilter, nfilter, list):
     """
     iplist = []
     for event, elem in cElementTree.iterparse(xm_file):
-        # Check if it is a record
-        if elem.tag == "record":
-            # Check that it is a RR Type that has an IP Address
-            if "address" in elem.attrib:
-                # Check if the IP is in the filter list of IPs to ignore
-                if (len(ifilter) == 0 or IPAddress(elem.attrib['address']) in ifilter) and (
-                        elem.attrib['address'] != "no_ip"):
-                    # Check if the RR Type against the types
-                    if re.match(tfilter, elem.attrib['type'], re.I):
-                        # Process A, AAAA and PTR Records
-                        if re.search(r'PTR|^[A]$|AAAA', elem.attrib['type']) \
-                                and re.search(nfilter, elem.attrib['name'], re.I):
-                            if list:
-                                if elem.attrib['address'] not in iplist:
-                                    print(elem.attrib['address'])
-                            else:
-                                print_good(f"{elem.attrib['type']} {elem.attrib['name']} {elem.attrib['address']}")
+        if "address" in elem.attrib:
+            if (
+                elem.tag == "record"
+                and (
+                    len(ifilter) == 0
+                    or IPAddress(elem.attrib['address']) in ifilter
+                )
+                and (elem.attrib['address'] != "no_ip")
+                and re.match(tfilter, elem.attrib['type'], re.I)
+            ):
+                # Process A, AAAA and PTR Records
+                if re.search(r'PTR|^[A]$|AAAA', elem.attrib['type']) \
+                        and re.search(nfilter, elem.attrib['name'], re.I):
+                    if list:
+                        if elem.attrib['address'] not in iplist:
+                            print(elem.attrib['address'])
+                    else:
+                        print_good(f"{elem.attrib['type']} {elem.attrib['name']} {elem.attrib['address']}")
 
-                        # Process NS Records
-                        elif re.search(r'NS', elem.attrib['type']) and \
-                                re.search(nfilter, elem.attrib['target'], re.I):
-                            if list:
-                                if elem.attrib['address'] not in iplist:
-                                    iplist.append(elem.attrib['address'])
-                            else:
-                                print_good(f"{elem.attrib['type']} {elem.attrib['target']} {elem.attrib['address']}")
+                # Process NS Records
+                elif re.search(r'NS', elem.attrib['type']) and \
+                        re.search(nfilter, elem.attrib['target'], re.I):
+                    if list:
+                        if elem.attrib['address'] not in iplist:
+                            iplist.append(elem.attrib['address'])
+                    else:
+                        print_good(f"{elem.attrib['type']} {elem.attrib['target']} {elem.attrib['address']}")
 
-                        # Process SOA Records
-                        elif re.search(r'SOA', elem.attrib['type']) and \
-                                re.search(nfilter, elem.attrib['mname'], re.I):
-                            if list:
-                                if elem.attrib['address'] not in iplist:
-                                    iplist.append(elem.attrib['address'])
-                            else:
-                                print_good(f"{elem.attrib['type']} {elem.attrib['mname']} {elem.attrib['address']}")
+                # Process SOA Records
+                elif re.search(r'SOA', elem.attrib['type']) and \
+                        re.search(nfilter, elem.attrib['mname'], re.I):
+                    if list:
+                        if elem.attrib['address'] not in iplist:
+                            iplist.append(elem.attrib['address'])
+                    else:
+                        print_good(f"{elem.attrib['type']} {elem.attrib['mname']} {elem.attrib['address']}")
 
-                        # Process MS Records
-                        elif re.search(r'MX', elem.attrib['type']) and \
-                                re.search(nfilter, elem.attrib['exchange'], re.I):
-                            if list:
-                                if elem.attrib['address'] not in iplist:
-                                    iplist.append(elem.attrib['address'])
-                            else:
-                                print_good(f"{elem.attrib['type']} {elem.attrib['exchange']} {elem.attrib['address']}")
+                # Process MS Records
+                elif re.search(r'MX', elem.attrib['type']) and \
+                        re.search(nfilter, elem.attrib['exchange'], re.I):
+                    if list:
+                        if elem.attrib['address'] not in iplist:
+                            iplist.append(elem.attrib['address'])
+                    else:
+                        print_good(f"{elem.attrib['type']} {elem.attrib['exchange']} {elem.attrib['address']}")
 
-                        # Process SRV Records
-                        elif re.search(r'SRV', elem.attrib['type']) and \
-                                re.search(nfilter, elem.attrib['target'], re.I):
-                            if list:
-                                if elem.attrib['address'] not in iplist:
-                                    iplist.append(elem.attrib['address'])
-                            else:
-                                print_good("{0} {1} {2} {3} {4}".format(elem.attrib['type'], elem.attrib['name'],
-                                                                        elem.attrib['address'], elem.attrib['target'],
-                                                                        elem.attrib['port']))
-            else:
-                if re.match(tfilter, elem.attrib['type'], re.I):
-                    # Process TXT and SPF Records
-                    if re.search(r'TXT|SPF', elem.attrib['type']):
-                        if not list:
-                            print_good("{0} {1}".format(elem.attrib['type'], elem.attrib['strings']))
+                # Process SRV Records
+                elif re.search(r'SRV', elem.attrib['type']) and \
+                        re.search(nfilter, elem.attrib['target'], re.I):
+                    if list:
+                        if elem.attrib['address'] not in iplist:
+                            iplist.append(elem.attrib['address'])
+                    else:
+                        print_good("{0} {1} {2} {3} {4}".format(elem.attrib['type'], elem.attrib['name'],
+                                                                elem.attrib['address'], elem.attrib['target'],
+                                                                elem.attrib['port']))
+        elif (
+            re.match(tfilter, elem.attrib['type'], re.I)
+            and re.search(r'TXT|SPF', elem.attrib['type'])
+            and not list
+        ):
+            if elem.tag == "record":
+                print_good("{0} {1}".format(elem.attrib['type'], elem.attrib['strings']))
     # Process IPs in list
-    if len(iplist) > 0:
+    if iplist:
         try:
             for ip in filter(None, iplist):
                 print_line(ip)
@@ -160,14 +162,17 @@ def csv_parse(csv_file, ifilter, tfilter, nfilter, list):
     next(reader)
     for row in reader:
         # Check if IP is in the filter list of addresses to ignore
-        if ((len(ifilter) == 0) or (IPAddress(row[2]) in ifilter)) and (row[2] != "no_ip"):
-            # Check Host Name regex and type list
-            if re.search(tfilter, row[0], re.I) and re.search(nfilter, row[1], re.I):
-                if list:
-                    if row[2] not in iplist:
-                        print(row[2])
-                else:
-                    print_good(" ".join(row))
+        if (
+            ((len(ifilter) == 0) or (IPAddress(row[2]) in ifilter))
+            and (row[2] != "no_ip")
+            and re.search(tfilter, row[0], re.I)
+            and re.search(nfilter, row[1], re.I)
+        ):
+            if list:
+                if row[2] not in iplist:
+                    print(row[2])
+            else:
+                print_good(" ".join(row))
     # Process IPs for target list if available
     # if len(iplist) > 0:
     #    for ip in filter(None, iplist):
@@ -181,35 +186,27 @@ def extract_hostnames(file):
     if file_type == "xml":
         for event, elem in cElementTree.iterparse(file):
             # Check if it is a record
-            if elem.tag == "record":
-                # Check that it is a RR Type that has an IP Address
-                if "address" in elem.attrib:
+            if elem.tag == "record" and "address" in elem.attrib:
                     # Process A, AAAA and PTR Records
-                    if re.search(r'PTR|^[A]$|AAAA', elem.attrib['type']):
-                        host_names.append(re.search(hostname_pattern, elem.attrib['name']).group(1))
+                if re.search(r'PTR|^[A]$|AAAA', elem.attrib['type']):
+                    host_names.append(re.search(hostname_pattern, elem.attrib['name'])[1])
 
-                    # Process NS Records
-                    elif re.search(r'NS', elem.attrib['type']):
-                        host_names.append(re.search(hostname_pattern, elem.attrib['target']).group(1))
+                elif re.search(r'NS', elem.attrib['type']):
+                    host_names.append(re.search(hostname_pattern, elem.attrib['target'])[1])
 
-                    # Process SOA Records
-                    elif re.search(r'SOA', elem.attrib['type']):
-                        host_names.append(re.search(hostname_pattern, elem.attrib['mname']).group(1))
+                elif re.search(r'SOA', elem.attrib['type']):
+                    host_names.append(re.search(hostname_pattern, elem.attrib['mname'])[1])
 
-                    # Process MX Records
-                    elif re.search(r'MX', elem.attrib['type']):
-                        host_names.append(re.search(hostname_pattern, elem.attrib['exchange']).group(1))
+                elif re.search(r'MX', elem.attrib['type']):
+                    host_names.append(re.search(hostname_pattern, elem.attrib['exchange'])[1])
 
-                    # Process SRV Records
-                    elif re.search(r'SRV', elem.attrib['type']):
-                        host_names.append(re.search(hostname_pattern, elem.attrib['target']).group(1))
+                elif re.search(r'SRV', elem.attrib['type']):
+                    host_names.append(re.search(hostname_pattern, elem.attrib['target'])[1])
 
     elif file_type == "csv":
         reader = csv.reader(open(file, 'r'), delimiter=',')
         reader.next()
-        for row in reader:
-            host_names.append(re.search(hostname_pattern, row[1]).group(1))
-
+        host_names.extend(re.search(hostname_pattern, row[1])[1] for row in reader)
     host_names = list(set(host_names))
     # Return list with no empty values
     return filter(None, host_names)
@@ -314,9 +311,9 @@ def main():
                 exit(1)
 
         elif opt in ('-r', '--range'):
-            ip_list = []
             ip_range = process_range(arg)
             if len(ip_range) > 0:
+                ip_list = []
                 ip_list.extend(ip_range)
             else:
                 sys.exit(1)

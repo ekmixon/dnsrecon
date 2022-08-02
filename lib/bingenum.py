@@ -36,7 +36,7 @@ def scrape_bing(dom):
     urllib._urlopener = AppURLopener()
 
     for n in searches:
-        url = "http://www.bing.com/search?q=domain%3A" + dom + "&qs=n&first=" + n
+        url = f"http://www.bing.com/search?q=domain%3A{dom}&qs=n&first={n}"
         req = urllib.request.Request(
             url,
             data=None,

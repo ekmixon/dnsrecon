@@ -94,8 +94,7 @@ class DnsHelper:
         if ns:
             res.nameservers = [ns]
 
-        answers = res.query(target, type_, tcp=self._is_tcp)
-        return answers
+        return res.query(target, type_, tcp=self._is_tcp)
 
     def query(self, q, where, timeout=None, port=53, af=None, source=None, source_port=0, one_rr_per_rrset=False):
 
@@ -179,13 +178,16 @@ class DnsHelper:
             for answer in answers:
                 exchange_ = strip_last_dot(answer.exchange.to_text())
 
-                a_or_aaaa_answers = self.get_answers(answer_type, exchange_)
-                if not a_or_aaaa_answers:
-                    continue
-
-                for a_or_aaaa_answer in a_or_aaaa_answers:
-                    result.append(['MX', exchange_, a_or_aaaa_answer.address,
-                                   answer.preference])
+                if a_or_aaaa_answers := self.get_answers(answer_type, exchange_):
+                    result.extend(
+                        [
+                            'MX',
+                            exchange_,
+                            a_or_aaaa_answer.address,
+                            answer.preference,
+                        ]
+                        for a_or_aaaa_answer in a_or_aaaa_answers
+                    )
 
         return result
 
@@ -202,9 +204,11 @@ class DnsHelper:
         for answer in answers:
             target_ = strip_last_dot(answer.target.to_text())
             addresses = self.get_ip(target_)
-            for type_, name_, addr_ in addresses:
-                if type_ in ['A', 'AAAA']:
-                    result.append(['NS', target_, addr_])
+            result.extend(
+                ['NS', target_, addr_]
+                for type_, name_, addr_ in addresses
+                if type_ in ['A', 'AAAA']
+            )
 
         return result
 
@@ -244,13 +248,11 @@ class DnsHelper:
                 mname_ = strip_last_dot(record[0].mname.to_text())
 
                 for record_type in record_types:
-                    a_or_aaaa_answers = self.get_answers(record_type, mname_)
-
-                    if not a_or_aaaa_answers:
-                        continue
-
-                    for a_or_aaaa_answer in a_or_aaaa_answers:
-                        result.append(['SOA', mname_, a_or_aaaa_answer.address])
+                    if a_or_aaaa_answers := self.get_answers(record_type, mname_):
+                        result.extend(
+                            ['SOA', mname_, a_or_aaaa_answer.address]
+                            for a_or_aaaa_answer in a_or_aaaa_answers
+                        )
 
         return result
 
@@ -277,7 +279,7 @@ class DnsHelper:
         if target is None:
             target = self._domain
 
-        targets = [target, "_dmarc." + target]
+        targets = [target, f"_dmarc.{target}"]
         result = []
         for target_ in targets:
 
@@ -319,10 +321,11 @@ class DnsHelper:
         for answer in answers:
             target_ = strip_last_dot(answer.target.to_text())
             a_or_aaaa_answers = self.get_ip(target_)
-            for type_, hostname_, addr_ in a_or_aaaa_answers:
-                if type_ in ['A', 'AAAA']:
-                    result.append(['SRV', host, target_, addr_,
-                                   str(answer.port), str(answer.weight)])
+            result.extend(
+                ['SRV', host, target_, addr_, str(answer.port), str(answer.weight)]
+                for type_, hostname_, addr_ in a_or_aaaa_answers
+                if type_ in ['A', 'AAAA']
+            )
 
         return result
 
@@ -341,10 +344,7 @@ class DnsHelper:
         z = None
         for r in xfr:
             if z is None:
-                if relativize:
-                    origin = r.origin
-                else:
-                    origin = r.answer[0].name
+                origin = r.origin if relativize else r.answer[0].name
                 rdclass = r.answer[0].rdclass
                 z = zone_factory(origin, rdclass, relativize=relativize)
             for rrset in r.answer:

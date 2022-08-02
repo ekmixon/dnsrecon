@@ -118,13 +118,9 @@ def process_spf_data(res, data):
 
     # Create a list of IPNetwork objects.
     for ip in ipv4:
-        for i in IPNetwork(ip):
-            ip_list.append(i)
-
+        ip_list.extend(iter(IPNetwork(ip)))
     for ip in ipv6:
-        for i in IPNetwork(ip):
-            ip_list.append(i)
-
+        ip_list.extend(iter(IPNetwork(ip)))
     # Extract and process include values.
     includes.extend(re.findall(r"include:(\S*)", "".join(data)))
     for inc_ranges in includes:
@@ -452,11 +448,12 @@ def brute_domain(res, dictfile, dom, filter_=None, verbose=False, ignore_wildcar
             found_dict = {"type": type_, "name": name_}
             if type_ in ['A', 'AAAA']:
                 # Filter Records if filtering was enabled
-                if filter_:
-                    if wildcard_set and address_or_target_ not in wildcard_set:
-                        print_and_append = True
-                        found_dict["address"] = address_or_target_
-                else:
+                if (
+                    filter_
+                    and wildcard_set
+                    and address_or_target_ not in wildcard_set
+                    or not filter_
+                ):
                     print_and_append = True
                     found_dict["address"] = address_or_target_
             elif type_ == 'CNAME':
@@ -550,27 +547,31 @@ def get_whois_nets_iplist(ip_list):
     found_nets = []
     for ip in ip_list:
         if ip != "no_ip":
-            # Find appropriate Whois Server for the IP
-            whois_server = get_whois(ip)
-            # If we get a Whois server Process get the whois and process.
-            if whois_server:
+            if whois_server := get_whois(ip):
                 whois_data = whois(ip, whois_server)
                 arin_style = re.search("NetRange", whois_data)
                 ripe_apic_style = re.search("netname", whois_data)
                 if arin_style or ripe_apic_style:
-                    net = get_whois_nets(whois_data)
-                    if net:
+                    if net := get_whois_nets(whois_data):
                         for network in net:
                             org = get_whois_orgname(whois_data)
                             found_nets.append({"start": network[0], "end": network[1], "orgname": "".join(org)})
                 else:
                     for line in whois_data.splitlines():
-                        recordentrie = re.match(r"^(.*)\s\S*-\w*\s\S*\s(\S*\s-\s\S*)", line)
-                        if recordentrie:
+                        if recordentrie := re.match(
+                            r"^(.*)\s\S*-\w*\s\S*\s(\S*\s-\s\S*)", line
+                        ):
                             org = recordentrie.group(1)
                             net = get_whois_nets(recordentrie.group(2))
-                            for network in net:
-                                found_nets.append({"start": network[0], "end": network[1], "orgname": "".join(org)})
+                            found_nets.extend(
+                                {
+                                    "start": network[0],
+                                    "end": network[1],
+                                    "orgname": "".join(org),
+                                }
+                                for network in net
+                            )
+
     # Remove Duplicates
     return [seen.setdefault(idfun(e), e) for e in found_nets if idfun(e) not in seen]
 
@@ -588,7 +589,14 @@ def whois_ips(res, ip_list):
         print_status("The following IP Ranges were found:")
         for i in range(len(list_whois)):
             print_status(
-                "\t {0} {1}-{2} {3}".format(str(i) + ")", list_whois[i]["start"], list_whois[i]["end"], list_whois[i]["orgname"]))
+                "\t {0} {1}-{2} {3}".format(
+                    f"{str(i)})",
+                    list_whois[i]["start"],
+                    list_whois[i]["end"],
+                    list_whois[i]["orgname"],
+                )
+            )
+
         print_status("What Range do you wish to do a Reverse Lookup for?")
         print_status("number, comma separated list, a for all or n for none")
         val = sys.stdin.readline()[:-1]
@@ -667,8 +675,15 @@ def create_db(db):
     # Connect to the DB
     con = sqlite3.connect(db)
 
-    # Create SQL Queries to be used in the script
-    make_table = """CREATE TABLE data (
+    # Set the cursor for connection
+    con.isolation_level = None
+    cur = con.cursor()
+
+    # Connect and create table
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='data';")
+    if cur.fetchone() is None:
+        # Create SQL Queries to be used in the script
+        make_table = """CREATE TABLE data (
     serial integer  Primary Key Autoincrement,
     domain TEXT(256),
     type TEXT(8),
@@ -680,17 +695,8 @@ def create_db(db):
     zt_dns TEXT(32)
     )"""
 
-    # Set the cursor for connection
-    con.isolation_level = None
-    cur = con.cursor()
-
-    # Connect and create table
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='data';")
-    if cur.fetchone() is None:
         cur.execute(make_table)
         con.commit()
-    else:
-        pass
 
 
 def make_csv(data):
@@ -704,7 +710,7 @@ def make_csv(data):
             record = record_tmp[0]
 
         type_ = record['type'].upper()
-        csv_data += type_ + ","
+        csv_data += f"{type_},"
 
         if type_ in ['PTR', 'A', 'AAAA', 'NS', 'SOA', 'MX']:
 
@@ -723,7 +729,7 @@ def make_csv(data):
             if 'zone_server' not in record:
                 csv_data += record['name']
 
-            csv_data += ("," * 4) + "'{}'\n".format(record['strings'])
+            csv_data += "," * 4 + f"'{record['strings']}'\n"
 
         elif type_ == 'SRV':
             items = [record["name"], record["address"],
@@ -807,7 +813,7 @@ def write_db(db, data):
             # Handle not common records
             t = n['type']
             del n['type']
-            record_data = "".join(['%s=%s,' % (key, value) for key, value in n.items()])
+            record_data = "".join([f'{key}={value},' for key, value in n.items()])
             records = [t, record_data]
             query = "insert into data(domain,type,text) values (\"%(domain)\", '" + \
                     records[0] + "','" + records[1] + "')"
@@ -818,14 +824,14 @@ def write_db(db, data):
 
 
 def get_nsec_type(domain, res):
-    target = "0." + domain
+    target = f"0.{domain}"
 
     answer = get_a_answer(res, target, res._res.nameservers[0], res._res.timeout)
     for a in answer.authority:
-        if a.rdtype == 50:
-            return "NSEC3"
-        elif a.rdtype == 47:
+        if a.rdtype == 47:
             return "NSEC"
+        elif a.rdtype == 50:
+            return "NSEC3"
 
 
 def dns_sec_check(domain, res):
@@ -841,7 +847,7 @@ def dns_sec_check(domain, res):
             if rdata.flags == 256:
                 key_type = "ZSK"
 
-            if rdata.flags == 257:
+            elif rdata.flags == 257:
                 key_type = "KSk"
 
             print_status("\t{0} {1} {2} {3}".format(nsectype, key_type, algorithm_to_text(rdata.algorithm),
@@ -897,8 +903,7 @@ def check_recursive(res, ns_server, timeout):
             response = res.query(query, ns_server, timeout)
             recursion_flag_pattern = r"\.*RA\.*"
             flags = dns.flags.to_text(response.flags)
-            result = re.findall(recursion_flag_pattern, flags)
-            if result:
+            if result := re.findall(recursion_flag_pattern, flags):
                 print_error(f"\t Recursion enabled on NS Server {ns_server}")
             is_recursive = True
         except (socket.error, dns.exception.Timeout):

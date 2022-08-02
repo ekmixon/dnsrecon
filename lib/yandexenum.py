@@ -39,7 +39,7 @@ def scrape_yandex(dom):
     urllib._urlopener = AppURLopener()
 
     for _ in searches:
-        url = "https://yandex.com/search/?text=site%3A" + dom
+        url = f"https://yandex.com/search/?text=site%3A{dom}"
         try:
             sock = urllib.request.urlopen(url, timeout=10)
             data = sock.read().decode("utf-8")

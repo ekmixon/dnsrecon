@@ -118,13 +118,9 @@ def process_spf_data(res, data):
 
     # Create a list of IPNetwork objects.
     for ip in ipv4:
-        for i in IPNetwork(ip):
-            ip_list.append(i)
-
+        ip_list.extend(iter(IPNetwork(ip)))
     for ip in ipv6:
-        for i in IPNetwork(ip):
-            ip_list.append(i)
-
+        ip_list.extend(iter(IPNetwork(ip)))
     # Extract and process include values.
     includes.extend(re.findall(r"include:(\S*)", "".join(data)))
     for inc_ranges in includes:
@@ -452,11 +448,11 @@ def brute_domain(res, dictfile, dom, filter_=None, verbose=False, ignore_wildcar
             found_dict = {"type": type_, "name": name_}
             if type_ in ['A', 'AAAA']:
                 # Filter Records if filtering was enabled
-                if filter_:
-                    if address_or_target_ not in wildcard_set:
-                        print_and_append = True
-                        found_dict["address"] = address_or_target_
-                else:
+                if (
+                    filter_
+                    and address_or_target_ not in wildcard_set
+                    or not filter_
+                ):
                     print_and_append = True
                     found_dict["address"] = address_or_target_
             elif type_ == 'CNAME':
@@ -550,27 +546,31 @@ def get_whois_nets_iplist(ip_list):
     found_nets = []
     for ip in ip_list:
         if ip != "no_ip":
-            # Find appropriate Whois Server for the IP
-            whois_server = get_whois(ip)
-            # If we get a Whois server Process get the whois and process.
-            if whois_server:
+            if whois_server := get_whois(ip):
                 whois_data = whois(ip, whois_server)
                 arin_style = re.search("NetRange", whois_data)
                 ripe_apic_style = re.search("netname", whois_data)
                 if arin_style or ripe_apic_style:
-                    net = get_whois_nets(whois_data)
-                    if net:
+                    if net := get_whois_nets(whois_data):
                         for network in net:
                             org = get_whois_orgname(whois_data)
                             found_nets.append({"start": network[0], "end": network[1], "orgname": "".join(org)})
                 else:
                     for line in whois_data.splitlines():
-                        recordentrie = re.match(r"^(.*)\s\S*-\w*\s\S*\s(\S*\s-\s\S*)", line)
-                        if recordentrie:
+                        if recordentrie := re.match(
+                            r"^(.*)\s\S*-\w*\s\S*\s(\S*\s-\s\S*)", line
+                        ):
                             org = recordentrie.group(1)
                             net = get_whois_nets(recordentrie.group(2))
-                            for network in net:
-                                found_nets.append({"start": network[0], "end": network[1], "orgname": "".join(org)})
+                            found_nets.extend(
+                                {
+                                    "start": network[0],
+                                    "end": network[1],
+                                    "orgname": "".join(org),
+                                }
+                                for network in net
+                            )
+
     # Remove Duplicates
     return [seen.setdefault(idfun(e), e) for e in found_nets if idfun(e) not in seen]
 
@@ -588,7 +588,14 @@ def whois_ips(res, ip_list):
         print_status("The following IP Ranges were found:")
         for i in range(len(list_whois)):
             print_status(
-                "\t {0} {1}-{2} {3}".format(str(i) + ")", list_whois[i]["start"], list_whois[i]["end"], list_whois[i]["orgname"]))
+                "\t {0} {1}-{2} {3}".format(
+                    f"{str(i)})",
+                    list_whois[i]["start"],
+                    list_whois[i]["end"],
+                    list_whois[i]["orgname"],
+                )
+            )
+
         print_status("What Range do you wish to do a Reverse Lookup for?")
         print_status("number, comma separated list, a for all or n for none")
         val = sys.stdin.readline()[:-1]
@@ -667,8 +674,15 @@ def create_db(db):
     # Connect to the DB
     con = sqlite3.connect(db)
 
-    # Create SQL Queries to be used in the script
-    make_table = """CREATE TABLE data (
+    # Set the cursor for connection
+    con.isolation_level = None
+    cur = con.cursor()
+
+    # Connect and create table
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='data';")
+    if cur.fetchone() is None:
+        # Create SQL Queries to be used in the script
+        make_table = """CREATE TABLE data (
     serial integer  Primary Key Autoincrement,
     domain TEXT(256),
     type TEXT(8),
@@ -680,17 +694,8 @@ def create_db(db):
     zt_dns TEXT(32)
     )"""
 
-    # Set the cursor for connection
-    con.isolation_level = None
-    cur = con.cursor()
-
-    # Connect and create table
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='data';")
-    if cur.fetchone() is None:
         cur.execute(make_table)
         con.commit()
-    else:
-        pass
 
 
 def make_csv(data):
@@ -704,7 +709,7 @@ def make_csv(data):
             continue
 
         type_ = record['type'].upper()
-        csv_data += type_ + ","
+        csv_data += f"{type_},"
 
         if type_ in ['PTR', 'A', 'AAAA', 'NS', 'SOA', 'MX']:
 
@@ -723,7 +728,7 @@ def make_csv(data):
             if 'zone_server' not in record:
                 csv_data += record['name']
 
-            csv_data += ("," * 4) + "'{}'\n".format(record['strings'])
+            csv_data += "," * 4 + f"'{record['strings']}'\n"
 
         elif type_ == 'SRV':
             items = [record["name"], record["address"],
@@ -807,7 +812,7 @@ def write_db(db, data):
             # Handle not common records
             t = n['type']
             del n['type']
-            record_data = "".join(['%s=%s,' % (key, value) for key, value in n.items()])
+            record_data = "".join([f'{key}={value},' for key, value in n.items()])
             records = [t, record_data]
             query = "insert into data(domain,type,text) values (\"%(domain)\", '" + \
                     records[0] + "','" + records[1] + "')"
@@ -818,14 +823,14 @@ def write_db(db, data):
 
 
 def get_nsec_type(domain, res):
-    target = "0." + domain
+    target = f"0.{domain}"
 
     answer = get_a_answer(res, target, res._res.nameservers[0], res._res.timeout)
     for a in answer.authority:
-        if a.rdtype == 50:
-            return "NSEC3"
-        elif a.rdtype == 47:
+        if a.rdtype == 47:
             return "NSEC"
+        elif a.rdtype == 50:
+            return "NSEC3"
 
 
 def dns_sec_check(domain, res):
@@ -841,7 +846,7 @@ def dns_sec_check(domain, res):
             if rdata.flags == 256:
                 key_type = "ZSK"
 
-            if rdata.flags == 257:
+            elif rdata.flags == 257:
                 key_type = "KSk"
 
             print_status("\t{0} {1} {2} {3}".format(nsectype, key_type, algorithm_to_text(rdata.algorithm),
@@ -897,8 +902,7 @@ def check_recursive(res, ns_server, timeout):
             response = res.query(query, ns_server, timeout)
             recursion_flag_pattern = r"\.*RA\.*"
             flags = dns.flags.to_text(response.flags)
-            result = re.findall(recursion_flag_pattern, flags)
-            if result:
+            if result := re.findall(recursion_flag_pattern, flags):
                 print_error(f"\t Recursion enabled on NS Server {ns_server}")
             is_recursive = True
         except (socket.error, dns.exception.Timeout):
@@ -915,12 +919,6 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
     """
     returned_records = []
 
-    # Var for SPF Record Range Reverse Look-up
-    found_spf_ranges = []
-
-    # Var to hold the IP Addresses that will be queried in Whois
-    ip_for_whois = []
-
     # Check if wildcards are enabled on the target domain
     check_wildcard(res, domain)
 
@@ -932,7 +930,7 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
         zonerecs = res.zone_transfer()
         if zonerecs is not None:
             returned_records.extend(res.zone_transfer())
-            if len(returned_records) == 0:
+            if not returned_records:
                 from_zt = True
 
     # If a Zone Trasfer was possible there is no need to enumerate the rest
@@ -940,6 +938,9 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
 
         # Check if DNSSEC is configured
         dns_sec_check(domain, res)
+
+        # Var to hold the IP Addresses that will be queried in Whois
+        ip_for_whois = []
 
         # Enumerate SOA Record
         try:
@@ -1009,7 +1010,9 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
             for s in spf_text_data:
                 print_status("\t {0} {1}".format(s[0], s[1]))
                 text_data = s[1]
-                returned_records.extend([{"domain": domain, "type": s[0], "strings": s[1]}])
+                returned_records.extend(
+                    [{"domain": domain, "type": s[0], "strings": text_data}]
+                )
 
         txt_text_data = res.get_txt()
 
@@ -1020,7 +1023,7 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
                 text_data += t[2]
                 returned_records.extend([{"domain": domain, "type": t[0], "name": t[1], "strings": t[2]}])
 
-        domainkey_text_data = res.get_txt("_domainkey." + domain)
+        domainkey_text_data = res.get_txt(f"_domainkey.{domain}")
 
         # Save dictionary of returned record
         if domainkey_text_data is not None:
@@ -1029,13 +1032,16 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
                 text_data += t[2]
                 returned_records.extend([{"domain": domain, "type": t[0], "name": t[1], "strings": t[2]}])
 
+        # Var for SPF Record Range Reverse Look-up
+        found_spf_ranges = []
+
         # Process SPF records if selected
         if do_spf and len(text_data) > 0:
             print_status("Expanding IP ranges found in DNS and TXT records for Reverse Look-up")
             processed_spf_data = process_spf_data(res, text_data)
             if processed_spf_data is not None:
                 found_spf_ranges.extend(processed_spf_data)
-            if len(found_spf_ranges) > 0:
+            if found_spf_ranges:
                 print_status("Performing Reverse Look-up of SPF Ranges")
                 returned_records.extend(brute_reverse(res, unique(found_spf_ranges)))
             else:
@@ -1043,8 +1049,7 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
 
         # Enumerate SRV Records for the targeted Domain
         print_status("Enumerating SRV Records")
-        srv_rcd = brute_srv(res, domain, thread_num=thread_num)
-        if srv_rcd:
+        if srv_rcd := brute_srv(res, domain, thread_num=thread_num):
             for r in srv_rcd:
                 ip_for_whois.append(r["address"])
                 returned_records.extend([{"domain": domain, "type": r['type'], "name": r['name'],
@@ -1053,40 +1058,33 @@ def general_enum(res, domain, do_axfr, do_bing, do_yandex, do_spf, do_whois, do_
         # Do Bing Search enumeration if selected
         if do_bing:
             print_status("Performing Bing Search Enumeration")
-            bing_rcd = se_result_process(res, scrape_bing(domain))
-            if bing_rcd:
-                for r in bing_rcd:
-                    if "address" in bing_rcd:
-                        ip_for_whois.append(r["address"])
+            if bing_rcd := se_result_process(res, scrape_bing(domain)):
+                ip_for_whois.extend(r["address"] for r in bing_rcd if "address" in bing_rcd)
                 returned_records.extend(bing_rcd)
 
         # Do Yandex Search enumeration if selected
         if do_yandex:
             print_status("Performing Yandex Search Enumeration")
-            yandex_rcd = se_result_process(res, scrape_bing(domain))
-            if yandex_rcd:
-                for r in yandex_rcd:
-                    if "address" in yandex_rcd:
-                        ip_for_whois.append(r["address"])
+            if yandex_rcd := se_result_process(res, scrape_bing(domain)):
+                ip_for_whois.extend(
+                    r["address"] for r in yandex_rcd if "address" in yandex_rcd
+                )
+
                 returned_records.extend(yandex_rcd)
 
         if do_crt:
             print_status("Performing Crt.sh Search Enumeration")
             crt_rcd = se_result_process(res, scrape_crtsh(domain))
-            for r in crt_rcd:
-                if "address" in crt_rcd:
-                    ip_for_whois.append(r["address"])
+            ip_for_whois.extend(r["address"] for r in crt_rcd if "address" in crt_rcd)
             returned_records.extend(crt_rcd)
 
         if do_whois:
-            whois_rcd = whois_ips(res, ip_for_whois)
-            if whois_rcd:
+            if whois_rcd := whois_ips(res, ip_for_whois):
                 for r in whois_rcd:
                     returned_records.extend(r)
 
         if zw:
-            zone_info = ds_zone_walk(res, domain, request_timeout)
-            if zone_info:
+            if zone_info := ds_zone_walk(res, domain, request_timeout):
                 returned_records.extend(zone_info)
 
         return returned_records
@@ -1120,9 +1118,7 @@ def get_constants(prefix):
     """
     Create a dictionary mapping socket module constants to their names.
     """
-    return dict((getattr(socket, n), n)
-                for n in dir(socket)
-                if n.startswith(prefix))
+    return {getattr(socket, n): n for n in dir(socket) if n.startswith(prefix)}
 
 
 def socket_resolv(target):
